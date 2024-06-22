@@ -1,0 +1,3 @@
+[submodule "lib/PureSpice"]
+	path = lib/PureSpice
+	url = https://github.com/gnif/PureSpice
