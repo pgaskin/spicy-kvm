@@ -40,6 +40,8 @@ cmake -B build -DCMAKE_EXPORT_COMPILE_COMMANDS=1 -GNinja
 ninja -C build
 ```
 
+Ensure SPICE is enable and exposed over TCP. VirtIO input devices are also required.
+
 <!--
 ```
 usage: spicy-kvm [options]
