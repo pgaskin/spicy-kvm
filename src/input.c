@@ -22,6 +22,7 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <sys/prctl.h>
+#include <sys/time.h>
 #include <unistd.h>
 
 #include <libevdev/libevdev.h>
@@ -183,6 +184,9 @@ static struct {
     bool grab_key[KEY_MAX];
     ssize_t grabbed_keyboard;
     ssize_t grabbed_mouse;
+
+    struct timeval grab_key_at;
+    bool temp_ungrabbed_mouse;
 } input = {
     .grab_key = {
         [KEY_RIGHTCTRL] = true,
@@ -218,6 +222,12 @@ static void input_ungrab(void) {
         }
         input.grabbed_mouse = -1;
     }
+}
+
+static uint64_t tv_ms_diff(const struct timeval *a, const struct timeval *b) {
+    uint64_t msa = (a->tv_sec * (uint64_t)(1000LL)) + (a->tv_usec / 1000);
+    uint64_t msb = (b->tv_sec * (uint64_t)(1000LL)) + (b->tv_usec / 1000);
+    return msb > msa ? msb - msa : msa - msb;
 }
 
 static void *input_device_thread(void *data) {
@@ -273,28 +283,67 @@ loop:
 
     // check for the grab key
     if (ev.type == EV_KEY && input.grab_key[ev.code]) {
+        // store the key down time
+        if (ev.value == 1) {
+            gettimeofday(&input.grab_key_at, NULL);
+
+            // if this is from the grabbed keyboard, ungrab the mouse while the key is held
+            if (input.grabbed_keyboard == idx && input.grabbed_mouse != -1 && input.libevdev[input.grabbed_mouse]) {
+                const char *name = libevdev_get_name(input.libevdev[input.grabbed_mouse]) ?: "(no name)";
+                printf("input: temporarily ungrabbing mouse %s while grab key is held\n", name);
+                if ((rc = libevdev_grab(input.libevdev[input.grabbed_mouse], LIBEVDEV_UNGRAB)) < 0) {
+                    fprintf(stderr, "input: warning: failed to un-grab device %s\n", name);
+                }
+                input.temp_ungrabbed_mouse = true;
+            }
+        }
         // on key up (so the key doesn't get stuck down)
         if (ev.value == 0) {
-            const char *name = libevdev_get_name(input.libevdev[idx]) ?: "(no name)";
-            fprintf(stdout, "input: handling grab key from device %s\n", name);
+            struct timeval now;
+            gettimeofday(&now, NULL);
 
-            bool ungrab = input.grabbed_keyboard == idx;
-            if (input.grabbed_keyboard != -1) {
-                fprintf(stdout, "input: ungrabbing everything\n");
-                input_ungrab();
-            }
-            if (!ungrab) {
-                if ((rc = libevdev_grab(input.libevdev[idx], LIBEVDEV_GRAB)) < 0) {
-                    fprintf(stderr, "input: warning: failed to grab device %s\n", name);
-                } else {
-                    fprintf(stdout, "input: grabbed device %s\n", name);
-                    if (input.grabbed_keyboard != -1 || input.grabbed_mouse != -1) {
-                        fprintf(stdout, "input: ungrabbing old inputs\n");
-                        input_ungrab();
+            const char *name = libevdev_get_name(input.libevdev[idx]) ?: "(no name)";
+
+            // if it was a short key press (or we don't know)
+            if (input.grab_key_at.tv_sec == 0 || tv_ms_diff(&now, &input.grab_key_at) < 250) {
+                fprintf(stdout, "input: handling grab key release from device %s\n", name);
+
+                bool ungrab = input.grabbed_keyboard == idx;
+                if (input.grabbed_keyboard != -1) {
+                    fprintf(stdout, "input: ungrabbing everything\n");
+                    input_ungrab();
+                }
+                if (!ungrab) {
+                    if ((rc = libevdev_grab(input.libevdev[idx], LIBEVDEV_GRAB)) < 0) {
+                        fprintf(stderr, "input: warning: failed to grab device %s\n", name);
+                    } else {
+                        fprintf(stdout, "input: grabbed device %s\n", name);
+                        if (input.grabbed_keyboard != -1 || input.grabbed_mouse != -1) {
+                            fprintf(stdout, "input: ungrabbing old inputs\n");
+                            input_ungrab();
+                        }
+                        input.grabbed_keyboard = idx;
                     }
-                    input.grabbed_keyboard = idx;
+                }
+            } else {
+                fprintf(stdout, "input: ignoring grab key release from device %s\n", name);
+
+                // re-grab if we temporarily ungrabbed the mouse
+                if (input.temp_ungrabbed_mouse && input.grabbed_keyboard == idx && input.grabbed_mouse != -1 && input.libevdev[input.grabbed_mouse]) {
+                    const char *name = libevdev_get_name(input.libevdev[input.grabbed_mouse]) ?: "(no name)";
+                    printf("input: re-grabbing mouse %s since grab key was released after a long press\n", name);
+                    if ((rc = libevdev_grab(input.libevdev[input.grabbed_mouse], LIBEVDEV_GRAB)) < 0) {
+                        fprintf(stderr, "input: warning: failed to re-grab device %s\n", name);
+                    }
+                    input.temp_ungrabbed_mouse = false;
                 }
             }
+
+            // clear the stored down time
+            input.grab_key_at = (struct timeval){
+                .tv_sec = 0,
+                .tv_usec = 0,
+            };
         }
         goto loop; // don't send the grab key to the spice server
     }
@@ -321,6 +370,11 @@ loop:
 
     // if the device isn't grabbed, don't forward the event
     if (input.grabbed_keyboard != idx && input.grabbed_mouse != idx) {
+        goto loop;
+    }
+
+    // if we're temporarily un-grabbing the mouse, don't handle events from the mouse
+    if (input.temp_ungrabbed_mouse && input.grabbed_mouse == idx) {
         goto loop;
     }
 
