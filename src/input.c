@@ -335,7 +335,6 @@ loop:
                     if ((rc = libevdev_grab(input.libevdev[input.grabbed_mouse], LIBEVDEV_GRAB)) < 0) {
                         fprintf(stderr, "input: warning: failed to re-grab device %s\n", name);
                     }
-                    input.temp_ungrabbed_mouse = false;
                 }
             }
 
@@ -344,6 +343,7 @@ loop:
                 .tv_sec = 0,
                 .tv_usec = 0,
             };
+            input.temp_ungrabbed_mouse = false;
         }
         goto loop; // don't send the grab key to the spice server
     }
