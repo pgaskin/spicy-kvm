@@ -162,7 +162,7 @@ int main(int argc, char **argv) {
         int i2c;
         if ((rc = ddcci_find_i2c(ddc.drm, &i2c))) {
             fprintf(stderr, "warning: failed to initialize ddc: no i2c device found for '%s': %s\n", ddc.drm, ddcci_strerror(rc));
-        } else if ((rc = ddcci_open(&ddcci, 6))) {
+        } else if ((rc = ddcci_open(&ddcci, i2c))) {
             fprintf(stderr, "warning: failed to initialize ddc: i2c %d: %s\n", i2c, ddcci_strerror(rc));
         } else {
             fprintf(stdout, "info: using i2c %d for '%s'\n", i2c, ddc.drm);
@@ -210,7 +210,7 @@ int main(int argc, char **argv) {
                     int i2c;
                     if ((rc = ddcci_find_i2c(ddc.drm, &i2c))) {
                         fprintf(stderr, "warning: failed to initialize ddc: no i2c device found for '%s': %s\n", ddc.drm, ddcci_strerror(rc));
-                    } else if ((rc = ddcci_open(&ddcci, 6))) {
+                    } else if ((rc = ddcci_open(&ddcci, i2c))) {
                         fprintf(stderr, "warning: failed to initialize ddc: i2c %d: %s\n", i2c, ddcci_strerror(rc));
                     } else {
                         fprintf(stdout, "info: using i2c %d for '%s'\n", i2c, ddc.drm);
